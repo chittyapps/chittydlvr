@@ -78,7 +78,7 @@ Certified delivery engine with cryptographic proof of receipt. Every send produc
 
 ## Compliance
 
-- [ ] Service registered in ChittyRegistry
+- [x] Service registered in ChittyRegistry
 - [x] Health endpoint operational at /health
 - [x] CLAUDE.md development guide present
 - [x] CHARTER.md present
