@@ -16,8 +16,8 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    // Health check
-    if (url.pathname === '/health') {
+    // Health check (both /health and /dlvr/health for api.chitty.cc route)
+    if (url.pathname === '/health' || url.pathname === '/dlvr/health') {
       return Response.json({
         service: 'ChittyDLVR',
         status: 'healthy',
