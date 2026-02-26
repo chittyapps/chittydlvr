@@ -167,6 +167,21 @@ describe('ChittyDLVR', () => {
       expect(result.signature.signedPayload).toBeDefined();
     });
 
+    it('includes drand temporal anchor when available', async () => {
+      await dlvr.initialize();
+      const result = await dlvr.receipt('DD-TEST-123', {
+        signer: 'recipient-id',
+        method: 'digital'
+      });
+
+      // drand may or may not be reachable in test env
+      if (result.drand) {
+        expect(result.drand.round).toBeGreaterThan(0);
+        expect(result.drand.randomness).toBeDefined();
+        expect(result.drand.beacon).toBe('https://drand.cloudflare.com');
+      }
+    });
+
     it('includes legal scoring', async () => {
       await dlvr.initialize();
       const result = await dlvr.receipt('DD-TEST-123', {

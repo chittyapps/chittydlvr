@@ -7,10 +7,31 @@
  * witnessed by ChittyOS, timestamped, and anchored to ChittyChain.
  */
 
+const DRAND_URL = 'https://drand.cloudflare.com';
+const DRAND_CHAIN_HASH = '8990e7a9aaed2ffed73dbd7092123d6f289930540d7651336225dc172e51b2ce';
+
 export class ReceiptEngine {
   constructor(dlvr) {
     this.dlvr = dlvr;
     this._keyPair = null;
+  }
+
+  /**
+   * Fetch latest drand round from Cloudflare's beacon
+   */
+  async fetchDrandRound() {
+    try {
+      const response = await fetch(`${DRAND_URL}/${DRAND_CHAIN_HASH}/public/latest`);
+      if (!response.ok) return null;
+      const data = await response.json();
+      return {
+        round: data.round,
+        randomness: data.randomness,
+        signature: data.signature
+      };
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -35,13 +56,18 @@ export class ReceiptEngine {
 
     const receiptId = this.generateReceiptId();
 
-    // Build the payload to sign
+    // Fetch drand round for public temporal anchoring
+    const drand = await this.fetchDrandRound();
+
+    // Build the payload to sign (includes drand for temporal proof)
     const payload = {
       receiptId,
       deliveryId,
       signer,
       method,
-      timestamp
+      timestamp,
+      drandRound: drand?.round || null,
+      drandRandomness: drand?.randomness || null
     };
 
     // Sign with ECDSA-P256
@@ -88,6 +114,15 @@ export class ReceiptEngine {
       witnessed: true,
       witness: 'ChittyOS',
       witnessTimestamp: timestamp,
+
+      // drand temporal anchor
+      drand: drand ? {
+        round: drand.round,
+        randomness: drand.randomness,
+        signature: drand.signature,
+        beacon: DRAND_URL,
+        chainHash: DRAND_CHAIN_HASH
+      } : null,
 
       // Status
       status: 'VALID',
