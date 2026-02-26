@@ -14,6 +14,8 @@ export class ReceiptEngine {
   constructor(dlvr) {
     this.dlvr = dlvr;
     this._keyPair = null;
+    // In-memory receipt store for verification lookups
+    this._receipts = new Map();
   }
 
   /**
@@ -22,29 +24,73 @@ export class ReceiptEngine {
   async fetchDrandRound() {
     try {
       const response = await fetch(`${DRAND_URL}/${DRAND_CHAIN_HASH}/public/latest`);
-      if (!response.ok) return null;
+      if (!response.ok) {
+        console.error(`drand fetch failed: HTTP ${response.status} ${response.statusText}`);
+        return null;
+      }
       const data = await response.json();
+      if (!data.round || !data.randomness || !data.signature) {
+        console.error('drand returned incomplete data:', JSON.stringify(data));
+        return null;
+      }
       return {
         round: data.round,
         randomness: data.randomness,
         signature: data.signature
       };
-    } catch {
+    } catch (error) {
+      console.error('drand fetch error (receipt proceeds without temporal proof):', error.message);
       return null;
     }
   }
 
   /**
-   * Get or generate ECDSA key pair for receipt signing
+   * Get or import ECDSA key pair for receipt signing.
+   * If SIGNING_KEY_JWK is configured, imports persistent key.
+   * Otherwise generates ephemeral key with a warning.
    */
   async getServiceKeyPair() {
     if (this._keyPair) return this._keyPair;
 
-    this._keyPair = await crypto.subtle.generateKey(
-      { name: 'ECDSA', namedCurve: 'P-256' },
-      true,
-      ['sign', 'verify']
-    );
+    // Try to load persistent key from config
+    const jwk = this.dlvr?.signingKeyJwk;
+    if (jwk) {
+      try {
+        const keyData = typeof jwk === 'string' ? JSON.parse(jwk) : jwk;
+        const privateKey = await crypto.subtle.importKey(
+          'jwk', keyData,
+          { name: 'ECDSA', namedCurve: 'P-256' },
+          true,
+          ['sign']
+        );
+        const publicJwk = { ...keyData };
+        delete publicJwk.d;
+        const publicKey = await crypto.subtle.importKey(
+          'jwk', publicJwk,
+          { name: 'ECDSA', namedCurve: 'P-256' },
+          true,
+          ['verify']
+        );
+        this._keyPair = { privateKey, publicKey };
+        return this._keyPair;
+      } catch (error) {
+        console.error('CRITICAL: Failed to import signing key from SIGNING_KEY_JWK:', error.message);
+        throw new Error(`Signing key import failed: ${error.message}. Check SIGNING_KEY_JWK configuration.`);
+      }
+    }
+
+    // Fall back to ephemeral key — receipts won't survive restart
+    console.warn('WARNING: Using ephemeral signing key. Set SIGNING_KEY_JWK for persistent receipt verification.');
+    try {
+      this._keyPair = await crypto.subtle.generateKey(
+        { name: 'ECDSA', namedCurve: 'P-256' },
+        true,
+        ['sign', 'verify']
+      );
+    } catch (error) {
+      console.error('CRITICAL: ECDSA key generation failed:', error.message);
+      throw new Error(`Cryptographic key generation failed: ${error.message}. Receipt signing is unavailable.`);
+    }
     return this._keyPair;
   }
 
@@ -70,10 +116,13 @@ export class ReceiptEngine {
       drandRandomness: drand?.randomness || null
     };
 
+    // Serialize payload once — use same bytes for signing and embedding
+    const serializedPayload = JSON.stringify(payload);
+
     // Sign with ECDSA-P256
     const keyPair = await this.getServiceKeyPair();
     const encoder = new TextEncoder();
-    const dataBuffer = encoder.encode(JSON.stringify(payload));
+    const dataBuffer = encoder.encode(serializedPayload);
 
     const signatureBuffer = await crypto.subtle.sign(
       { name: 'ECDSA', hash: 'SHA-256' },
@@ -83,10 +132,10 @@ export class ReceiptEngine {
 
     const publicKeyBuffer = await crypto.subtle.exportKey('spki', keyPair.publicKey);
 
-    const signatureB64 = btoa(String.fromCharCode(...new Uint8Array(signatureBuffer)));
-    const publicKeyB64 = btoa(String.fromCharCode(...new Uint8Array(publicKeyBuffer)));
+    const signatureB64 = this.bufferToBase64(signatureBuffer);
+    const publicKeyB64 = this.bufferToBase64(publicKeyBuffer);
 
-    return {
+    const receipt = {
       receiptId,
       deliveryId,
 
@@ -105,7 +154,7 @@ export class ReceiptEngine {
         algorithm: 'ECDSA-P256-SHA256',
         value: signatureB64,
         publicKey: publicKeyB64,
-        signedPayload: JSON.stringify(payload),
+        signedPayload: serializedPayload,
         valid: true,
         timestamp
       },
@@ -143,30 +192,55 @@ export class ReceiptEngine {
       // Verification
       verifyUrl: `https://chitty.cc/receipt/${receiptId}`
     };
+
+    // Store receipt for public verification lookups
+    this._receipts.set(receiptId, receipt);
+
+    return receipt;
   }
 
   /**
-   * Verify an existing receipt signature
+   * Look up a receipt by ID from the in-memory store
+   */
+  getById(receiptId) {
+    return this._receipts.get(receiptId) || null;
+  }
+
+  /**
+   * Verify an existing receipt signature.
+   * If receiptData is not provided, attempts to look up by receiptId.
    */
   async verify(receiptId, receiptData) {
+    // If no receipt data provided, try to look it up
+    if (!receiptData) {
+      receiptData = this.getById(receiptId);
+    }
+
     if (!receiptData || !receiptData.signature) {
       return {
         receiptId,
         verified: false,
-        error: 'No receipt data or signature provided'
+        error: 'Receipt not found or no signature data'
       };
     }
 
     try {
-      const keyPair = await this.getServiceKeyPair();
+      // Import the public key from the receipt (self-contained verification)
+      const keyData = Uint8Array.from(atob(receiptData.signature.publicKey), c => c.charCodeAt(0));
+      const importedKey = await crypto.subtle.importKey(
+        'spki', keyData,
+        { name: 'ECDSA', namedCurve: 'P-256' },
+        false,
+        ['verify']
+      );
+
       const encoder = new TextEncoder();
       const dataBuffer = encoder.encode(receiptData.signature.signedPayload);
-
       const sigBytes = Uint8Array.from(atob(receiptData.signature.value), c => c.charCodeAt(0));
 
       const valid = await crypto.subtle.verify(
         { name: 'ECDSA', hash: 'SHA-256' },
-        keyPair.publicKey,
+        importedKey,
         sigBytes,
         dataBuffer
       );
@@ -179,11 +253,13 @@ export class ReceiptEngine {
         chainAnchored: true,
         timestamp: new Date().toISOString()
       };
-    } catch {
+    } catch (error) {
+      console.error(`Receipt verification error for ${receiptId}:`, error.message);
       return {
         receiptId,
         verified: false,
-        error: 'Signature verification failed'
+        verificationError: true,
+        error: `Verification system error: ${error.message}`
       };
     }
   }
@@ -252,6 +328,15 @@ export class ReceiptEngine {
       legalService: 95
     };
     return scores[method] || 70;
+  }
+
+  bufferToBase64(buffer) {
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
   }
 
   generateReceiptId() {

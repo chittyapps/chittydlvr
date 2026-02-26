@@ -15,6 +15,7 @@ export class ChittyDLVR {
     this.apiKey = config.apiKey || null;
     this.baseUrl = config.baseUrl || 'https://api.chitty.cc/dlvr/v1';
     this.chittyId = config.chittyId || null;
+    this.signingKeyJwk = config.signingKeyJwk || null;
 
     // Core engines
     this.channels = new DeliveryChannel(this);

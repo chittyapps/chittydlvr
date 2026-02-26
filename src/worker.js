@@ -52,14 +52,14 @@ async function authenticate(request, env) {
     return { valid: false };
   }
 
-  // Constant-time comparison
-  if (token.length !== validKey.length) return { valid: false };
+  // Constant-time comparison: hash both to fixed-length then XOR
+  // Hashing ensures comparison time is independent of key length
   const encoder = new TextEncoder();
-  const a = encoder.encode(token);
-  const b = encoder.encode(validKey);
+  const tokenHash = new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(token)));
+  const keyHash = new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(validKey)));
   let mismatch = 0;
-  for (let i = 0; i < a.length; i++) {
-    mismatch |= a[i] ^ b[i];
+  for (let i = 0; i < tokenHash.length; i++) {
+    mismatch |= tokenHash[i] ^ keyHash[i];
   }
   if (mismatch !== 0) return { valid: false };
 
@@ -107,9 +107,14 @@ export default {
         });
       }
 
+      if (!env.INTERNAL_API_KEY) {
+        console.error('INTERNAL_API_KEY not configured in environment');
+        return jsonResponse({ error: 'Service misconfigured' }, 503);
+      }
       const dlvr = new ChittyDLVR({
-        apiKey: env.INTERNAL_API_KEY || 'internal-service-key-min16',
-        chittyId: env.CHITTY_ID
+        apiKey: env.INTERNAL_API_KEY,
+        chittyId: env.CHITTY_ID,
+        signingKeyJwk: env.SIGNING_KEY_JWK
       });
       await dlvr.initialize();
 
@@ -224,17 +229,30 @@ async function handleRequest(url, request, dlvr, env) {
 }
 
 async function handlePublicRoute(path, request, dlvr) {
-  if (path.startsWith('/verify/receipt/')) {
-    const receiptId = path.split('/').pop();
-    const result = await dlvr.receipts.verify(receiptId);
-    return jsonResponse(result, 200, request);
-  }
+  try {
+    if (path.startsWith('/verify/receipt/')) {
+      const receiptId = path.split('/').pop();
+      if (!/^DR-/.test(receiptId)) {
+        return jsonResponse({ error: 'Invalid receipt ID format' }, 400, request);
+      }
+      // Look up receipt data, then verify signature
+      const receiptData = dlvr.receipts.getById(receiptId);
+      const result = await dlvr.receipts.verify(receiptId, receiptData);
+      return jsonResponse(result, 200, request);
+    }
 
-  if (path.startsWith('/track/')) {
-    const deliveryId = path.split('/').pop();
-    const result = await dlvr.status(deliveryId);
-    return jsonResponse(result, 200, request);
-  }
+    if (path.startsWith('/track/')) {
+      const deliveryId = path.split('/').pop();
+      if (!/^DD-/.test(deliveryId)) {
+        return jsonResponse({ error: 'Invalid delivery ID format' }, 400, request);
+      }
+      const result = await dlvr.status(deliveryId);
+      return jsonResponse(result, 200, request);
+    }
 
-  return jsonResponse({ error: 'Not found' }, 404, request);
+    return jsonResponse({ error: 'Not found' }, 404, request);
+  } catch (error) {
+    console.error('Public route error:', error.message);
+    return jsonResponse({ error: 'Internal server error' }, 500, request);
+  }
 }

@@ -198,6 +198,58 @@ describe('ChittyDLVR', () => {
     });
   });
 
+  describe('receipt sign→verify round-trip', () => {
+    it('receipt created by receipt() verifies successfully', async () => {
+      await dlvr.initialize();
+      const receipt = await dlvr.receipt('DD-TEST-VERIFY', {
+        signer: 'recipient-id',
+        method: 'digital'
+      });
+
+      // Verify using the receipt engine
+      const result = await dlvr.receipts.verify(receipt.receiptId, receipt);
+      expect(result.verified).toBe(true);
+      expect(result.signatureValid).toBe(true);
+      expect(result.receiptId).toBe(receipt.receiptId);
+    });
+
+    it('receipt verifies via in-memory store lookup', async () => {
+      await dlvr.initialize();
+      const receipt = await dlvr.receipt('DD-TEST-LOOKUP', {
+        signer: 'recipient-id',
+        method: 'digital'
+      });
+
+      // Verify by ID only (should look up from internal store)
+      const result = await dlvr.receipts.verify(receipt.receiptId);
+      expect(result.verified).toBe(true);
+      expect(result.signatureValid).toBe(true);
+    });
+
+    it('verification fails with tampered payload', async () => {
+      await dlvr.initialize();
+      const receipt = await dlvr.receipt('DD-TEST-TAMPER', {
+        signer: 'recipient-id',
+        method: 'digital'
+      });
+
+      // Tamper with the signed payload
+      const tampered = {
+        ...receipt,
+        signature: { ...receipt.signature, signedPayload: receipt.signature.signedPayload + ':tampered' }
+      };
+      const result = await dlvr.receipts.verify(receipt.receiptId, tampered);
+      expect(result.verified).toBe(false);
+    });
+
+    it('verification returns error for unknown receipt ID', async () => {
+      await dlvr.initialize();
+      const result = await dlvr.receipts.verify('DR-NONEXISTENT');
+      expect(result.verified).toBe(false);
+      expect(result.error).toBeDefined();
+    });
+  });
+
   describe('serve (legal service)', () => {
     it('initiates service of process', async () => {
       await dlvr.initialize();
