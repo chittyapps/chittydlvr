@@ -1,0 +1,27 @@
+{
+  "name": "@chitty/dlvr",
+  "version": "1.0.0",
+  "description": "ChittyDLVR - Certified delivery with proof. Delivered. Confirmed. Defended.",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./sdk": "./src/sdk/client.js",
+    "./verify": "./src/verify/public.js"
+  },
+  "scripts": {
+    "dev": "vitest --watch",
+    "test": "vitest run",
+    "build": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "deploy": "wrangler deploy",
+    "deploy:staging": "wrangler deploy --env staging"
+  },
+  "keywords": ["delivery", "certified", "proof", "chitty", "legal", "receipt"],
+  "author": "ChittyApps",
+  "license": "MIT",
+  "devDependencies": {
+    "vitest": "^1.6.0",
+    "wrangler": "^3.114.0"
+  }
+}
