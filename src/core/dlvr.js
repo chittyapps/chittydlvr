@@ -29,23 +29,24 @@ export class ChittyDLVR {
    */
   async initialize() {
     if (this.initialized) return this;
+
+    if (this.apiKey) {
+      await this.validateApiKey();
+    }
+
     this.initialized = true;
     return this;
   }
 
   /**
    * Send a certified delivery
-   *
-   * @param {Object} options
-   * @param {string} options.mintId - DocuMint document ID
-   * @param {string} options.to - Recipient ChittyID or address
-   * @param {string} options.method - Delivery method (email, sms, portal, etc.)
-   * @param {string} options.address - Delivery address (email, phone, etc.)
-   * @param {Object} options.options - Method-specific options
-   * @returns {Promise<DeliveryResult>}
    */
   async send(options) {
     const { mintId, to, method = 'email', address, options: deliveryOptions = {} } = options;
+
+    if (!mintId || typeof mintId !== 'string') {
+      throw new Error('mintId is required and must be a string');
+    }
 
     const deliveryId = this.generateDeliveryId();
     const timestamp = new Date().toISOString();
@@ -101,10 +102,6 @@ export class ChittyDLVR {
 
   /**
    * Record delivery confirmation from channel
-   *
-   * @param {string} deliveryId
-   * @param {Object} confirmation - Channel-specific confirmation data
-   * @returns {Promise<DeliveryStatus>}
    */
   async confirm(deliveryId, confirmation = {}) {
     const timestamp = new Date().toISOString();
@@ -127,10 +124,6 @@ export class ChittyDLVR {
 
   /**
    * Record that recipient opened/viewed the delivery
-   *
-   * @param {string} deliveryId
-   * @param {Object} viewData
-   * @returns {Promise<DeliveryStatus>}
    */
   async opened(deliveryId, viewData = {}) {
     const timestamp = new Date().toISOString();
@@ -154,12 +147,6 @@ export class ChittyDLVR {
 
   /**
    * Create a signed receipt (cryptographic proof of receipt)
-   *
-   * @param {string} deliveryId
-   * @param {Object} options
-   * @param {string} options.signer - Recipient ChittyID
-   * @param {string} options.method - How receipt was obtained
-   * @returns {Promise<Receipt>}
    */
   async receipt(deliveryId, options = {}) {
     return await this.receipts.create({
@@ -172,9 +159,6 @@ export class ChittyDLVR {
 
   /**
    * Get full delivery status with timeline
-   *
-   * @param {string} deliveryId
-   * @returns {Promise<DeliveryTimeline>}
    */
   async status(deliveryId) {
     return {
@@ -192,13 +176,6 @@ export class ChittyDLVR {
 
   /**
    * Initiate legal service of process
-   *
-   * @param {string} mintId - Document to serve
-   * @param {Object} options
-   * @param {string} options.respondent - Person being served
-   * @param {string} options.serviceType - personal, substituted, constructive, publication
-   * @param {Object} options.address - Physical address for service
-   * @returns {Promise<ServiceResult>}
    */
   async serve(mintId, options) {
     return await this.service.initiate({
@@ -210,10 +187,6 @@ export class ChittyDLVR {
 
   /**
    * Record proof of service (affidavit from process server)
-   *
-   * @param {string} serviceId
-   * @param {Object} affidavit
-   * @returns {Promise<ServiceProof>}
    */
   async recordService(serviceId, affidavit) {
     return await this.service.recordAffidavit({
@@ -225,22 +198,35 @@ export class ChittyDLVR {
 
   /**
    * Bulk send - deliver to multiple recipients
-   *
-   * @param {Object} options
-   * @param {string} options.mintId - Document to deliver
-   * @param {Array} options.recipients - Array of {to, method, address}
-   * @returns {Promise<BulkDeliveryResult>}
    */
   async bulkSend(options) {
     const { mintId, recipients } = options;
+
+    if (!mintId || typeof mintId !== 'string') {
+      throw new Error('mintId is required and must be a string');
+    }
+    if (!Array.isArray(recipients) || recipients.length === 0) {
+      throw new Error('recipients must be a non-empty array');
+    }
+
     const results = [];
 
     for (const recipient of recipients) {
-      const result = await this.send({
-        mintId,
-        ...recipient
-      });
-      results.push(result);
+      try {
+        const result = await this.send({
+          mintId,
+          ...recipient
+        });
+        results.push(result);
+      } catch (error) {
+        results.push({
+          deliveryId: null,
+          to: recipient.to,
+          method: recipient.method,
+          status: 'FAILED',
+          error: error.message
+        });
+      }
     }
 
     return {
@@ -256,18 +242,15 @@ export class ChittyDLVR {
 
   // ============ Scoring ============
 
-  /**
-   * Calculate delivery proof score based on method and status
-   */
   calculateDeliveryScore(method, status) {
     const methodScores = {
-      legalService: 95,  // Process server with affidavit
-      inPerson: 90,      // In-person with witness
-      portal: 85,        // Secure portal with auth
-      email: 70,         // Email with read receipt
-      sms: 60,           // SMS with delivery confirm
-      api: 65,           // API webhook
-      physical: 75       // Tracked mail
+      legalService: 95,
+      inPerson: 90,
+      portal: 85,
+      email: 70,
+      sms: 60,
+      api: 65,
+      physical: 75
     };
 
     const statusMultipliers = {
@@ -279,7 +262,7 @@ export class ChittyDLVR {
       RECEIPTED: 1.0,
       FAILED: 0,
       BOUNCED: 0,
-      REFUSED: 0.5  // Refused still counts as attempted delivery
+      REFUSED: 0.5
     };
 
     const baseScore = methodScores[method] || 50;
@@ -291,15 +274,25 @@ export class ChittyDLVR {
   // ============ ID Generation ============
 
   generateDeliveryId() {
-    const timestamp = Date.now().toString(36);
-    const random = Math.random().toString(36).substring(2, 10);
-    return `DD-${timestamp}-${random}`.toUpperCase();
+    const bytes = new Uint8Array(8);
+    crypto.getRandomValues(bytes);
+    const random = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+    return `DD-${Date.now().toString(36)}-${random}`.toUpperCase();
   }
 
   generateBulkId() {
-    const timestamp = Date.now().toString(36);
-    const random = Math.random().toString(36).substring(2, 6);
-    return `DB-${timestamp}-${random}`.toUpperCase();
+    const bytes = new Uint8Array(4);
+    crypto.getRandomValues(bytes);
+    const random = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+    return `DB-${Date.now().toString(36)}-${random}`.toUpperCase();
+  }
+
+  async validateApiKey() {
+    if (!this.apiKey) return false;
+    if (typeof this.apiKey !== 'string' || this.apiKey.length < 16) {
+      throw new Error('Invalid API key format');
+    }
+    return true;
   }
 }
 

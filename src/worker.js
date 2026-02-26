@@ -5,52 +5,118 @@
 
 import { ChittyDLVR } from './core/dlvr.js';
 
+const ALLOWED_ORIGINS = [
+  'https://dlvr.chitty.cc',
+  'https://api.chitty.cc',
+  'https://portal.chitty.cc',
+  'https://chitty.cc'
+];
+
+function getCorsOrigin(request) {
+  const origin = request?.headers?.get('Origin');
+  if (origin && ALLOWED_ORIGINS.includes(origin)) return origin;
+  return ALLOWED_ORIGINS[0];
+}
+
+function jsonResponse(data, status = 200, request = null) {
+  return new Response(JSON.stringify(data, null, 2), {
+    status,
+    headers: {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': getCorsOrigin(request)
+    }
+  });
+}
+
+async function parseJSON(request) {
+  try {
+    const data = await request.json();
+    return { data };
+  } catch {
+    return { error: jsonResponse({ error: 'Invalid JSON in request body' }, 400) };
+  }
+}
+
+async function authenticate(request, env) {
+  const authHeader = request.headers.get('Authorization');
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return { valid: false };
+  }
+
+  const token = authHeader.substring(7);
+  if (!token) return { valid: false };
+
+  const validKey = env.API_KEY;
+  if (!validKey) {
+    console.error('API_KEY not configured in environment');
+    return { valid: false };
+  }
+
+  // Constant-time comparison
+  if (token.length !== validKey.length) return { valid: false };
+  const encoder = new TextEncoder();
+  const a = encoder.encode(token);
+  const b = encoder.encode(validKey);
+  let mismatch = 0;
+  for (let i = 0; i < a.length; i++) {
+    mismatch |= a[i] ^ b[i];
+  }
+  if (mismatch !== 0) return { valid: false };
+
+  return { valid: true, chittyId: env.CHITTY_ID || 'authenticated' };
+}
+
 export default {
   async queue(batch, env) {
     for (const message of batch.messages) {
-      console.log(`ChittyDLVR queue event: ${JSON.stringify(message.body)}`);
-      message.ack();
+      try {
+        console.log(`ChittyDLVR queue event: ${JSON.stringify(message.body)}`);
+        message.ack();
+      } catch (error) {
+        console.error('Queue message processing failed:', error.message);
+        message.retry({ delaySeconds: 30 });
+      }
     }
   },
 
   async fetch(request, env) {
-    const url = new URL(request.url);
-
-    // Health check (both /health and /dlvr/health for api.chitty.cc route)
-    if (url.pathname === '/health' || url.pathname === '/dlvr/health') {
-      return Response.json({
-        service: 'ChittyDLVR',
-        status: 'healthy',
-        version: env.VERSION || '1.0.0',
-        tagline: 'Delivered. Confirmed. Defended.',
-        timestamp: new Date().toISOString()
-      });
-    }
-
-    // CORS preflight
-    if (request.method === 'OPTIONS') {
-      return new Response(null, {
-        headers: {
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type, Authorization'
-        }
-      });
-    }
-
-    const dlvr = new ChittyDLVR({
-      apiKey: env.API_KEY,
-      chittyId: env.CHITTY_ID
-    });
-    await dlvr.initialize();
-
     try {
+      const url = new URL(request.url);
+
+      // Health check
+      if (url.pathname === '/health' || url.pathname === '/dlvr/health') {
+        return jsonResponse({
+          service: 'ChittyDLVR',
+          status: 'healthy',
+          version: env.VERSION || '1.0.0',
+          tagline: 'Delivered. Confirmed. Defended.',
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      // CORS preflight
+      if (request.method === 'OPTIONS') {
+        return new Response(null, {
+          status: 204,
+          headers: {
+            'Access-Control-Allow-Origin': getCorsOrigin(request),
+            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+            'Access-Control-Max-Age': '86400'
+          }
+        });
+      }
+
+      const dlvr = new ChittyDLVR({
+        apiKey: env.INTERNAL_API_KEY || 'internal-service-key-min16',
+        chittyId: env.CHITTY_ID
+      });
+      await dlvr.initialize();
+
       return await handleRequest(url, request, dlvr, env);
     } catch (error) {
-      return Response.json(
-        { error: error.message, code: 'INTERNAL_ERROR' },
-        { status: 500 }
-      );
+      console.error('ChittyDLVR Worker error:', error.message, error.stack);
+      return jsonResponse({ error: 'Internal server error', code: 'WORKER_ERROR' }, 500);
     }
   }
 };
@@ -60,69 +126,115 @@ async function handleRequest(url, request, dlvr, env) {
 
   // Public routes (no auth)
   if (path.startsWith('/verify/') || path.startsWith('/track/')) {
-    return handlePublicRoute(path, dlvr);
+    return handlePublicRoute(path, request, dlvr);
   }
 
   // Auth required for everything else
-  const authHeader = request.headers.get('Authorization');
-  if (!authHeader?.startsWith('Bearer ')) {
-    return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  const auth = await authenticate(request, env);
+  if (!auth.valid) {
+    return jsonResponse({ error: 'Unauthorized' }, 401, request);
   }
 
-  // API routes
+  // POST /dlvr/v1/send
   if (request.method === 'POST' && path === '/dlvr/v1/send') {
-    const body = await request.json();
-    const result = await dlvr.send(body);
-    return Response.json(result, { status: 201 });
+    const body = await parseJSON(request);
+    if (body.error) return body.error;
+
+    if (!body.data.mintId || typeof body.data.mintId !== 'string') {
+      return jsonResponse({ error: 'Missing required field: mintId' }, 400, request);
+    }
+
+    const result = await dlvr.send({ ...body.data, chittyId: auth.chittyId });
+    return jsonResponse(result, 201, request);
   }
 
+  // GET /dlvr/v1/status/:id
   if (request.method === 'GET' && path.startsWith('/dlvr/v1/status/')) {
     const deliveryId = path.split('/').pop();
+    if (!/^DD-/.test(deliveryId)) {
+      return jsonResponse({ error: 'Invalid delivery ID format' }, 400, request);
+    }
     const result = await dlvr.status(deliveryId);
-    return Response.json(result);
+    return jsonResponse(result, 200, request);
   }
 
-  if (request.method === 'POST' && path.match(/\/dlvr\/v1\/confirm\/.+/)) {
+  // POST /dlvr/v1/confirm/:id
+  if (request.method === 'POST' && path.match(/\/dlvr\/v1\/confirm\/[^/]+$/)) {
     const deliveryId = path.split('/').pop();
-    const body = await request.json();
-    const result = await dlvr.confirm(deliveryId, body);
-    return Response.json(result);
+    if (!/^DD-/.test(deliveryId)) {
+      return jsonResponse({ error: 'Invalid delivery ID format' }, 400, request);
+    }
+    const body = await parseJSON(request);
+    if (body.error) return body.error;
+
+    const result = await dlvr.confirm(deliveryId, body.data);
+    return jsonResponse(result, 200, request);
   }
 
-  if (request.method === 'POST' && path.match(/\/dlvr\/v1\/receipt\/.+/)) {
+  // POST /dlvr/v1/receipt/:id
+  if (request.method === 'POST' && path.match(/\/dlvr\/v1\/receipt\/[^/]+$/)) {
     const deliveryId = path.split('/').pop();
-    const body = await request.json();
-    const result = await dlvr.receipt(deliveryId, body);
-    return Response.json(result, { status: 201 });
+    if (!/^DD-/.test(deliveryId)) {
+      return jsonResponse({ error: 'Invalid delivery ID format' }, 400, request);
+    }
+    const body = await parseJSON(request);
+    if (body.error) return body.error;
+
+    if (!body.data.signer || typeof body.data.signer !== 'string') {
+      return jsonResponse({ error: 'Missing required field: signer' }, 400, request);
+    }
+
+    const result = await dlvr.receipt(deliveryId, body.data);
+    return jsonResponse(result, 201, request);
   }
 
+  // POST /dlvr/v1/serve
   if (request.method === 'POST' && path === '/dlvr/v1/serve') {
-    const body = await request.json();
-    const result = await dlvr.serve(body.mintId, body);
-    return Response.json(result, { status: 201 });
+    const body = await parseJSON(request);
+    if (body.error) return body.error;
+
+    if (!body.data.mintId || typeof body.data.mintId !== 'string') {
+      return jsonResponse({ error: 'Missing required field: mintId' }, 400, request);
+    }
+    if (!body.data.respondent || typeof body.data.respondent !== 'string') {
+      return jsonResponse({ error: 'Missing required field: respondent' }, 400, request);
+    }
+
+    const result = await dlvr.serve(body.data.mintId, body.data);
+    return jsonResponse(result, 201, request);
   }
 
+  // POST /dlvr/v1/bulk
   if (request.method === 'POST' && path === '/dlvr/v1/bulk') {
-    const body = await request.json();
-    const result = await dlvr.bulkSend(body);
-    return Response.json(result, { status: 201 });
+    const body = await parseJSON(request);
+    if (body.error) return body.error;
+
+    if (!body.data.mintId || typeof body.data.mintId !== 'string') {
+      return jsonResponse({ error: 'Missing required field: mintId' }, 400, request);
+    }
+    if (!Array.isArray(body.data.recipients) || body.data.recipients.length === 0) {
+      return jsonResponse({ error: 'Missing required field: recipients (non-empty array)' }, 400, request);
+    }
+
+    const result = await dlvr.bulkSend(body.data);
+    return jsonResponse(result, 201, request);
   }
 
-  return Response.json({ error: 'Not found' }, { status: 404 });
+  return jsonResponse({ error: 'Not found' }, 404, request);
 }
 
-async function handlePublicRoute(path, dlvr) {
+async function handlePublicRoute(path, request, dlvr) {
   if (path.startsWith('/verify/receipt/')) {
     const receiptId = path.split('/').pop();
     const result = await dlvr.receipts.verify(receiptId);
-    return Response.json(result);
+    return jsonResponse(result, 200, request);
   }
 
   if (path.startsWith('/track/')) {
     const deliveryId = path.split('/').pop();
     const result = await dlvr.status(deliveryId);
-    return Response.json(result);
+    return jsonResponse(result, 200, request);
   }
 
-  return Response.json({ error: 'Not found' }, { status: 404 });
+  return jsonResponse({ error: 'Not found' }, 404, request);
 }

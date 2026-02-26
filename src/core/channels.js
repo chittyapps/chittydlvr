@@ -3,6 +3,8 @@
  * Each channel handles the actual dispatch of deliveries.
  */
 
+const VALID_METHODS = ['email', 'sms', 'portal', 'api', 'physical', 'inPerson', 'legalService'];
+
 export class DeliveryChannel {
   constructor(dlvr) {
     this.dlvr = dlvr;
@@ -13,6 +15,10 @@ export class DeliveryChannel {
    */
   async dispatch(options) {
     const { deliveryId, method, address, mintId, timestamp } = options;
+
+    if (!VALID_METHODS.includes(method)) {
+      throw new Error(`Unsupported delivery method: ${method}. Valid methods: ${VALID_METHODS.join(', ')}`);
+    }
 
     const handler = this.getHandler(method);
     return await handler({
@@ -34,7 +40,7 @@ export class DeliveryChannel {
       legalService: (opts) => this.initiateLegalService(opts)
     };
 
-    return handlers[method] || handlers.email;
+    return handlers[method];
   }
 
   /**
@@ -89,7 +95,7 @@ export class DeliveryChannel {
       portalUrl: `https://portal.chitty.cc/delivery/${deliveryId}`,
       requiresAuth: true,
       authMethod: 'ChittyID',
-      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(), // 30 days
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
       timestamp
     };
   }
@@ -124,7 +130,7 @@ export class DeliveryChannel {
     return {
       channel: 'physical',
       dispatched: true,
-      carrier: null, // Set when actually shipped
+      carrier: null,
       trackingNumber: null,
       address,
       certified: true,
@@ -143,7 +149,7 @@ export class DeliveryChannel {
       channel: 'inPerson',
       dispatched: true,
       witnessRequired: true,
-      witness: null, // Set when delivery occurs
+      witness: null,
       location: null,
       geoVerified: false,
       timestamp
@@ -159,7 +165,7 @@ export class DeliveryChannel {
     return {
       channel: 'legalService',
       dispatched: true,
-      serviceType: null, // personal, substituted, constructive, publication
+      serviceType: null,
       processServer: null,
       jurisdiction: null,
       affidavitRequired: true,

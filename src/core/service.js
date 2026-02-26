@@ -11,6 +11,8 @@
  * Each produces an affidavit of service that scores 95 on the delivery pillar.
  */
 
+const VALID_SERVICE_TYPES = ['personal', 'substituted', 'constructive', 'publication'];
+
 export class ServiceEngine {
   constructor(dlvr) {
     this.dlvr = dlvr;
@@ -18,15 +20,6 @@ export class ServiceEngine {
 
   /**
    * Initiate service of process
-   *
-   * @param {Object} options
-   * @param {string} options.mintId - Document to serve
-   * @param {string} options.respondent - Person being served
-   * @param {string} options.serviceType - personal, substituted, constructive, publication
-   * @param {Object} options.address - Address for service
-   * @param {string} options.jurisdiction - Legal jurisdiction
-   * @param {string} options.timestamp
-   * @returns {Promise<ServiceResult>}
    */
   async initiate(options) {
     const {
@@ -37,6 +30,10 @@ export class ServiceEngine {
       jurisdiction,
       timestamp
     } = options;
+
+    if (!VALID_SERVICE_TYPES.includes(serviceType)) {
+      throw new Error(`Invalid service type: ${serviceType}. Valid types: ${VALID_SERVICE_TYPES.join(', ')}`);
+    }
 
     const serviceId = this.generateServiceId();
 
@@ -49,7 +46,7 @@ export class ServiceEngine {
       jurisdiction,
 
       // Process server assignment
-      processServer: null, // Assigned when server accepts
+      processServer: null,
       serverAssigned: false,
 
       // Status
@@ -70,7 +67,7 @@ export class ServiceEngine {
         pillar: 'delivery',
         method: 'legalService',
         serviceType,
-        score: 0, // Scored when service is completed
+        score: 0,
         affidavitFiled: false
       },
 
@@ -86,10 +83,6 @@ export class ServiceEngine {
 
   /**
    * Record a service attempt
-   *
-   * @param {string} serviceId
-   * @param {Object} attempt
-   * @returns {Promise<AttemptResult>}
    */
   async recordAttempt(serviceId, attempt) {
     const timestamp = new Date().toISOString();
@@ -99,7 +92,7 @@ export class ServiceEngine {
       attemptNumber: attempt.attemptNumber || 1,
       successful: attempt.successful || false,
       servedTo: attempt.servedTo || null,
-      relationship: attempt.relationship || null, // For substituted service
+      relationship: attempt.relationship || null,
       location: attempt.location || null,
       geoVerified: attempt.geoVerified || false,
       processServer: attempt.processServer,
@@ -112,13 +105,6 @@ export class ServiceEngine {
 
   /**
    * Record affidavit of service (proof of service)
-   *
-   * @param {Object} options
-   * @param {string} options.serviceId
-   * @param {string} options.processServer - Server who performed service
-   * @param {string} options.serviceType - How service was completed
-   * @param {Object} options.details - Affidavit details
-   * @returns {Promise<ServiceProof>}
    */
   async recordAffidavit(options) {
     const {
@@ -247,15 +233,17 @@ export class ServiceEngine {
   // ============ ID Generation ============
 
   generateServiceId() {
-    const timestamp = Date.now().toString(36);
-    const random = Math.random().toString(36).substring(2, 8);
-    return `DS-${timestamp}-${random}`.toUpperCase();
+    const bytes = new Uint8Array(6);
+    crypto.getRandomValues(bytes);
+    const random = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+    return `DS-${Date.now().toString(36)}-${random}`.toUpperCase();
   }
 
   generateAffidavitId() {
-    const timestamp = Date.now().toString(36);
-    const random = Math.random().toString(36).substring(2, 8);
-    return `DA-${timestamp}-${random}`.toUpperCase();
+    const bytes = new Uint8Array(6);
+    crypto.getRandomValues(bytes);
+    const random = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+    return `DA-${Date.now().toString(36)}-${random}`.toUpperCase();
   }
 }
 

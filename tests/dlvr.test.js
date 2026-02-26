@@ -9,12 +9,12 @@ describe('ChittyDLVR', () => {
   let dlvr;
 
   beforeEach(() => {
-    dlvr = new ChittyDLVR({ apiKey: 'test-key', chittyId: 'test-chitty-id' });
+    dlvr = new ChittyDLVR({ apiKey: 'test-key-minimum-16ch', chittyId: 'test-chitty-id' });
   });
 
   describe('constructor', () => {
     it('initializes with config', () => {
-      expect(dlvr.apiKey).toBe('test-key');
+      expect(dlvr.apiKey).toBe('test-key-minimum-16ch');
       expect(dlvr.chittyId).toBe('test-chitty-id');
       expect(dlvr.initialized).toBe(false);
     });
@@ -106,6 +106,23 @@ describe('ChittyDLVR', () => {
       expect(result.statusHistory[0].status).toBe('PENDING');
       expect(result.statusHistory[1].status).toBe('SENT');
     });
+
+    it('throws on unsupported delivery method', async () => {
+      await expect(dlvr.send({
+        mintId: 'DM-TEST',
+        to: 'recipient',
+        method: 'pigeon',
+        address: 'nest'
+      })).rejects.toThrow('Unsupported delivery method');
+    });
+
+    it('throws when mintId is missing', async () => {
+      await expect(dlvr.send({
+        to: 'recipient',
+        method: 'email',
+        address: 'test@example.com'
+      })).rejects.toThrow('mintId is required');
+    });
   });
 
   describe('confirm', () => {
@@ -131,7 +148,7 @@ describe('ChittyDLVR', () => {
   });
 
   describe('receipt', () => {
-    it('creates a signed receipt', async () => {
+    it('creates a signed receipt with real ECDSA signature', async () => {
       await dlvr.initialize();
       const result = await dlvr.receipt('DD-TEST-123', {
         signer: 'recipient-chitty-id',
@@ -144,6 +161,10 @@ describe('ChittyDLVR', () => {
       expect(result.status).toBe('VALID');
       expect(result.witnessed).toBe(true);
       expect(result.witness).toBe('ChittyOS');
+      // Real crypto: signature has value and publicKey
+      expect(result.signature.value).toBeDefined();
+      expect(result.signature.publicKey).toBeDefined();
+      expect(result.signature.signedPayload).toBeDefined();
     });
 
     it('includes legal scoring', async () => {
@@ -191,6 +212,14 @@ describe('ChittyDLVR', () => {
       expect(result.requirements.competentPerson).toBe(true);
       expect(result.requirements.mailCopy).toBe(true);
     });
+
+    it('throws on invalid service type', async () => {
+      await dlvr.initialize();
+      await expect(dlvr.serve('DM-TEST', {
+        respondent: 'Jane Doe',
+        serviceType: 'telekinesis'
+      })).rejects.toThrow('Invalid service type');
+    });
   });
 
   describe('recordService (affidavit)', () => {
@@ -230,6 +259,22 @@ describe('ChittyDLVR', () => {
       expect(result.totalRecipients).toBe(3);
       expect(result.sent).toBe(3);
       expect(result.deliveries).toHaveLength(3);
+    });
+
+    it('handles individual failures gracefully', async () => {
+      await dlvr.initialize();
+      const result = await dlvr.bulkSend({
+        mintId: 'DM-BULK-TEST',
+        recipients: [
+          { to: 'alice', method: 'email', address: 'alice@example.com' },
+          { to: 'bob', method: 'invalid_method', address: 'x' },
+          { to: 'charlie', method: 'portal' }
+        ]
+      });
+
+      expect(result.totalRecipients).toBe(3);
+      expect(result.sent).toBe(2);
+      expect(result.failed).toBe(1);
     });
   });
 
