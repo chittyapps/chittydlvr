@@ -65,6 +65,7 @@ export class ReceiptEngine {
         );
         const publicJwk = { ...keyData };
         delete publicJwk.d;
+        publicJwk.key_ops = ['verify'];
         const publicKey = await crypto.subtle.importKey(
           'jwk', publicJwk,
           { name: 'ECDSA', namedCurve: 'P-256' },
