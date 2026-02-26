@@ -3,7 +3,7 @@ uri: chittycanon://docs/ops/policy/chittydlvr-charter
 namespace: chittycanon://docs/ops
 type: policy
 version: 1.0.0
-status: PENDING
+status: CERTIFIED
 registered_with: chittycanon://core/services/canon
 title: "ChittyDLVR Charter"
 certifier: chittycanon://core/services/chittycertify
