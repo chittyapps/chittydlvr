@@ -46,9 +46,9 @@ async function authenticate(request, env) {
   const token = authHeader.substring(7);
   if (!token) return { valid: false };
 
-  const validKey = env.API_KEY;
+  const validKey = env.CHITTY_AUTH_SERVICE_TOKEN;
   if (!validKey) {
-    console.error('API_KEY not configured in environment');
+    console.error('CHITTY_AUTH_SERVICE_TOKEN not configured in environment');
     return { valid: false };
   }
 
@@ -87,10 +87,22 @@ export default {
       if (url.pathname === '/health' || url.pathname === '/dlvr/health') {
         return jsonResponse({
           service: 'ChittyDLVR',
-          status: 'healthy',
+          status: 'ok',
           version: env.VERSION || '1.0.0',
           tagline: 'Delivered. Confirmed. Defended.',
           timestamp: new Date().toISOString()
+        });
+      }
+
+      // Service status metadata
+      if (url.pathname === '/api/v1/status') {
+        return jsonResponse({
+          name: 'ChittyDLVR',
+          version: env.VERSION || '1.0.0',
+          environment: env.ENVIRONMENT || 'production',
+          description: 'Certified delivery with cryptographic proof of receipt',
+          uri: 'chittycanon://core/services/chittydlvr',
+          tier: 4
         });
       }
 
