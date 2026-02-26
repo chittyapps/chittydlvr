@@ -8,6 +8,12 @@ registered_with: chittycanon://core/services/canon
 title: "ChittyDLVR Charter"
 certifier: chittycanon://core/services/chittycertify
 visibility: PUBLIC
+author: "ChittyApps"
+created: 2026-02-25T00:00:00Z
+modified: 2026-02-26T00:00:00Z
+certified: 2026-02-25T00:00:00Z
+tags: [chittydlvr, delivery, receipt, ecdsa-p256, tier-4, domain]
+category: domain-services
 ---
 
 # ChittyDLVR Charter
@@ -74,7 +80,7 @@ Certified delivery engine with cryptographic proof of receipt. Every send produc
 
 - [ ] Service registered in ChittyRegistry
 - [x] Health endpoint operational at /health
-- [ ] CLAUDE.md development guide present
+- [x] CLAUDE.md development guide present
 - [x] CHARTER.md present
 - [x] CHITTY.md present
 

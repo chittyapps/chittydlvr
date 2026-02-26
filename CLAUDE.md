@@ -1,3 +1,14 @@
+---
+uri: chittycanon://docs/tech/spec/chittydlvr-dev-guide
+namespace: chittycanon://docs/tech
+type: spec
+version: 1.0.0
+status: CERTIFIED
+registered_with: chittycanon://core/services/canon
+title: "ChittyDLVR Development Guide"
+visibility: PUBLIC
+---
+
 # ChittyDLVR
 
 Certified delivery engine with cryptographic proof of receipt. Cloudflare Worker at `dlvr.chitty.cc`.

@@ -8,6 +8,12 @@ registered_with: chittycanon://core/services/canon
 title: "ChittyDLVR"
 certifier: chittycanon://core/services/chittycertify
 visibility: PUBLIC
+author: "ChittyApps"
+created: 2026-02-25T00:00:00Z
+modified: 2026-02-26T00:00:00Z
+certified: 2026-02-25T00:00:00Z
+tags: [chittydlvr, delivery, receipt, legal-service, ecdsa-p256, tier-4, domain]
+category: domain-services
 ---
 
 # ChittyDLVR

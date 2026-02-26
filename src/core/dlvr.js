@@ -3,6 +3,7 @@
  * "Delivered. Confirmed. Defended."
  *
  * Certified delivery engine. Every send produces proof.
+ * @canon chittycanon://core/services/chittydlvr
  * Integrates with DocuMint's Pillar 4 (Delivery Proof).
  */
 

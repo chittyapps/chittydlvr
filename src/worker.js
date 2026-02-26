@@ -1,6 +1,7 @@
 /**
  * ChittyDLVR Worker
  * Cloudflare Worker entry point
+ * @canon chittycanon://core/services/chittydlvr
  */
 
 import { ChittyDLVR } from './core/dlvr.js';
