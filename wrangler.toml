@@ -3,22 +3,11 @@ main = "src/worker.js"
 compatibility_date = "2026-03-16"
 compatibility_flags = ["nodejs_compat"]
 account_id = "0bc21e3a5a9de1a4cc843be9c3e98121"
-
-[observability]
-enabled = false
-head_sampling_rate = 1
-
 [observability.logs]
 enabled = true
 head_sampling_rate = 1
 persist = true
 invocation_logs = true
-
-[observability.traces]
-enabled = true
-persist = true
-head_sampling_rate = 1
-
 [[tail_consumers]]
 service = "chittytrack"
 
@@ -55,3 +44,18 @@ ENVIRONMENT = "staging"
 name = "chittydlvr-dev"
 [env.dev.vars]
 ENVIRONMENT = "development"
+
+[observability]
+enabled = true
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+invocation_logs = true
+destinations = ["chittytrack-logs"]
+
+[observability.traces]
+enabled = true
+head_sampling_rate = 1
+destinations = ["chittytrack-traces"]
+persist = false
