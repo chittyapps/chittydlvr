@@ -127,7 +127,8 @@ export default {
       const dlvr = new ChittyDLVR({
         apiKey: env.INTERNAL_API_KEY,
         chittyId: env.CHITTY_ID,
-        signingKeyJwk: env.SIGNING_KEY_JWK
+        signingKeyJwk: env.SIGNING_KEY_JWK,
+        env
       });
       await dlvr.initialize();
 

@@ -10,6 +10,7 @@
 import { DeliveryChannel } from './channels.js';
 import { ReceiptEngine } from './receipt.js';
 import { ServiceEngine } from './service.js';
+import { createRegisteredEmailClient } from './registered-email.js';
 
 export class ChittyDLVR {
   constructor(config = {}) {
@@ -17,6 +18,12 @@ export class ChittyDLVR {
     this.baseUrl = config.baseUrl || 'https://api.chitty.cc/dlvr/v1';
     this.chittyId = config.chittyId || null;
     this.signingKeyJwk = config.signingKeyJwk || null;
+
+    // Registered email provider (RPost RMail direct or via chittyrouter);
+    // null when unconfigured — email channel falls back to simulated dispatch
+    this.registeredEmail = config.registeredEmail !== undefined
+      ? config.registeredEmail
+      : createRegisteredEmailClient(config.env || {});
 
     // Core engines
     this.channels = new DeliveryChannel(this);
@@ -53,6 +60,17 @@ export class ChittyDLVR {
     const deliveryId = this.generateDeliveryId();
     const timestamp = new Date().toISOString();
 
+    const dispatch = await this.channels.dispatch({
+      deliveryId,
+      method,
+      address,
+      mintId,
+      options: deliveryOptions,
+      timestamp
+    });
+    // A channel that reports dispatched:false must not be recorded as SENT
+    const dispatchStatus = dispatch.dispatched === false ? 'FAILED' : 'SENT';
+
     // Create delivery record
     const delivery = {
       deliveryId,
@@ -63,20 +81,13 @@ export class ChittyDLVR {
       address,
 
       // Dispatch through channel
-      dispatch: await this.channels.dispatch({
-        deliveryId,
-        method,
-        address,
-        mintId,
-        options: deliveryOptions,
-        timestamp
-      }),
+      dispatch,
 
       // Status tracking
-      status: 'SENT',
+      status: dispatchStatus,
       statusHistory: [
         { status: 'PENDING', timestamp, actor: 'system' },
-        { status: 'SENT', timestamp: new Date().toISOString(), actor: 'system' }
+        { status: dispatchStatus, timestamp: new Date().toISOString(), actor: 'system' }
       ],
 
       // Proof linkage
@@ -85,12 +96,12 @@ export class ChittyDLVR {
         mintId,
         deliveryId,
         method,
-        score: this.calculateDeliveryScore(method, 'SENT')
+        score: this.calculateDeliveryScore(method, dispatchStatus)
       },
 
       // Timestamps
       createdAt: timestamp,
-      sentAt: new Date().toISOString(),
+      sentAt: dispatchStatus === 'SENT' ? new Date().toISOString() : null,
       deliveredAt: null,
       receiptedAt: null,
 

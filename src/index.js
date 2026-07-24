@@ -29,6 +29,11 @@ export { ChittyDLVR } from './core/dlvr.js';
 export { DeliveryChannel } from './core/channels.js';
 export { ReceiptEngine } from './core/receipt.js';
 export { ServiceEngine } from './core/service.js';
+export {
+  RPostRegisteredEmailClient,
+  RouterRegisteredEmailClient,
+  createRegisteredEmailClient
+} from './core/registered-email.js';
 
 // SDK Client
 export { DLVRClient, DLVRError } from './sdk/client.js';
