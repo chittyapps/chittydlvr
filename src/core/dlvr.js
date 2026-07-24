@@ -60,6 +60,17 @@ export class ChittyDLVR {
     const deliveryId = this.generateDeliveryId();
     const timestamp = new Date().toISOString();
 
+    const dispatch = await this.channels.dispatch({
+      deliveryId,
+      method,
+      address,
+      mintId,
+      options: deliveryOptions,
+      timestamp
+    });
+    // A channel that reports dispatched:false must not be recorded as SENT
+    const dispatchStatus = dispatch.dispatched === false ? 'FAILED' : 'SENT';
+
     // Create delivery record
     const delivery = {
       deliveryId,
@@ -70,20 +81,13 @@ export class ChittyDLVR {
       address,
 
       // Dispatch through channel
-      dispatch: await this.channels.dispatch({
-        deliveryId,
-        method,
-        address,
-        mintId,
-        options: deliveryOptions,
-        timestamp
-      }),
+      dispatch,
 
       // Status tracking
-      status: 'SENT',
+      status: dispatchStatus,
       statusHistory: [
         { status: 'PENDING', timestamp, actor: 'system' },
-        { status: 'SENT', timestamp: new Date().toISOString(), actor: 'system' }
+        { status: dispatchStatus, timestamp: new Date().toISOString(), actor: 'system' }
       ],
 
       // Proof linkage
@@ -92,12 +96,12 @@ export class ChittyDLVR {
         mintId,
         deliveryId,
         method,
-        score: this.calculateDeliveryScore(method, 'SENT')
+        score: this.calculateDeliveryScore(method, dispatchStatus)
       },
 
       // Timestamps
       createdAt: timestamp,
-      sentAt: new Date().toISOString(),
+      sentAt: dispatchStatus === 'SENT' ? new Date().toISOString() : null,
       deliveredAt: null,
       receiptedAt: null,
 

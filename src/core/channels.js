@@ -110,10 +110,18 @@ export class DeliveryChannel {
     }
   }
 
+  // mintId arrives from the request body — escape before interpolating into
+  // markup recipients are meant to trust
+  escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+  }
+
   buildEmailBody({ deliveryId, mintId, links }) {
     return [
       '<p>You have received a certified document delivery via ChittyDLVR.</p>',
-      `<p>Document: <strong>${mintId}</strong><br>Delivery ID: <strong>${deliveryId}</strong></p>`,
+      `<p>Document: <strong>${this.escapeHtml(mintId)}</strong><br>Delivery ID: <strong>${this.escapeHtml(deliveryId)}</strong></p>`,
       `<p><a href="${links.view}">View document</a> · <a href="${links.receipt}">Delivery receipt</a> · <a href="${links.decline}">Decline</a></p>`,
       '<p>This message is tracked and certified. Proof of delivery is recorded.</p>'
     ].join('\n');

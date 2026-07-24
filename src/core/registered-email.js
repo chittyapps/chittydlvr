@@ -17,6 +17,19 @@
 
 const DEFAULT_BASE_URL = 'https://webapi.r1.rpost.net';
 const TOKEN_EXPIRY_MARGIN_MS = 60000;
+const FETCH_TIMEOUT_MS = 15000;
+
+// Provider calls run synchronously in the delivery request path; a hung
+// upstream must not stall the Worker request with it
+async function fetchWithTimeout(url, init = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export class RPostRegisteredEmailClient {
   constructor({ baseUrl, username, password, clientId, appName }) {
@@ -41,7 +54,7 @@ export class RPostRegisteredEmailClient {
     });
     if (this.clientId) form.set('Client_Id', this.clientId);
 
-    const res = await fetch(`${this.baseUrl}/token`, {
+    const res = await fetchWithTimeout(`${this.baseUrl}/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: form.toString()
@@ -64,14 +77,14 @@ export class RPostRegisteredEmailClient {
 
   async authorizedFetch(path, init = {}) {
     let token = await this.getAccessToken();
-    let res = await fetch(`${this.baseUrl}${path}`, {
+    let res = await fetchWithTimeout(`${this.baseUrl}${path}`, {
       ...init,
       headers: { ...(init.headers || {}), 'Authorization': `Bearer ${token}` }
     });
     if (res.status === 401) {
       this.tokenState = null;
       token = await this.getAccessToken();
-      res = await fetch(`${this.baseUrl}${path}`, {
+      res = await fetchWithTimeout(`${this.baseUrl}${path}`, {
         ...init,
         headers: { ...(init.headers || {}), 'Authorization': `Bearer ${token}` }
       });
@@ -170,7 +183,7 @@ export class RouterRegisteredEmailClient {
   }
 
   async send({ to, cc, bcc, from, subject, body, customerTrackingId, clientCode, options }) {
-    const res = await fetch(`${this.url}/registered-email/send`, {
+    const res = await fetchWithTimeout(`${this.url}/registered-email/send`, {
       method: 'POST',
       headers: this.headers(),
       body: JSON.stringify({
@@ -203,7 +216,7 @@ export class RouterRegisteredEmailClient {
   }
 
   async getStatus(trackingId) {
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `${this.url}/registered-email/status?externalId=${encodeURIComponent(trackingId)}`,
       { headers: this.headers() }
     );
@@ -225,11 +238,22 @@ export class RouterRegisteredEmailClient {
   }
 }
 
+// Memoized per env object so a Worker isolate reuses one client (and its
+// cached RPost token) across requests instead of re-authenticating each time
+const clientCache = new WeakMap();
+
 /**
  * Build a registered email client from worker env, or null when unconfigured
  * (the email channel then falls back to simulated dispatch).
  */
 export function createRegisteredEmailClient(env = {}) {
+  if (clientCache.has(env)) return clientCache.get(env);
+  const client = buildRegisteredEmailClient(env);
+  clientCache.set(env, client);
+  return client;
+}
+
+function buildRegisteredEmailClient(env) {
   if (env.RPOST_USERNAME && env.RPOST_PASSWORD) {
     return new RPostRegisteredEmailClient({
       baseUrl: env.RPOST_BASE_URL,

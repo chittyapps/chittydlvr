@@ -39,6 +39,14 @@ describe('createRegisteredEmailClient', () => {
     expect(createRegisteredEmailClient()).toBeNull();
   });
 
+  it('memoizes the client per env object so token caches survive across requests', () => {
+    const env = { RPOST_USERNAME: 'u@x.com', RPOST_PASSWORD: 'pw' };
+    const first = createRegisteredEmailClient(env);
+    const second = createRegisteredEmailClient(env);
+    expect(second).toBe(first);
+    expect(createRegisteredEmailClient({ RPOST_USERNAME: 'u@x.com', RPOST_PASSWORD: 'pw' })).not.toBe(first);
+  });
+
   it('prefers direct RPost credentials', () => {
     const client = createRegisteredEmailClient({
       RPOST_USERNAME: 'u@x.com',
@@ -232,6 +240,40 @@ describe('email channel wiring', () => {
 
     expect(dispatch.dispatched).toBe(false);
     expect(dispatch.error).toMatch(/RPost token request failed/);
+  });
+
+  it('records the delivery as FAILED when dispatch fails', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonRes({ error: 'invalid_grant' }, 400));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const dlvr = new ChittyDLVR({
+      apiKey: 'test-key-minimum-16ch',
+      env: { RPOST_USERNAME: 'u@x.com', RPOST_PASSWORD: 'bad' }
+    });
+
+    const delivery = await dlvr.send({
+      mintId: 'DM-5',
+      to: 'someone',
+      method: 'email',
+      address: 'a@b.com'
+    });
+
+    expect(delivery.dispatch.dispatched).toBe(false);
+    expect(delivery.status).toBe('FAILED');
+    expect(delivery.statusHistory.map(s => s.status)).toEqual(['PENDING', 'FAILED']);
+    expect(delivery.sentAt).toBeNull();
+    expect(delivery.proof.score).toBe(0);
+  });
+
+  it('escapes HTML in interpolated email body values', () => {
+    const dlvr = new ChittyDLVR({ apiKey: 'test-key-minimum-16ch' });
+    const body = dlvr.channels.buildEmailBody({
+      deliveryId: 'DD-6',
+      mintId: '<img src=x onerror=alert(1)>',
+      links: { view: 'v', receipt: 'r', decline: 'd' }
+    });
+    expect(body).not.toContain('<img');
+    expect(body).toContain('&lt;img src=x onerror=alert(1)&gt;');
   });
 
   it('delegates to chittyrouter when only the router endpoint is configured', async () => {
