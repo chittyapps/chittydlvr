@@ -45,25 +45,78 @@ export class DeliveryChannel {
 
   /**
    * Certified email delivery
+   * Dispatches through the registered email provider (RPost RMail) when
+   * configured, so the send carries third-party Registered Receipt® proof.
+   * Falls back to a simulated dispatch when no provider is configured.
    */
   async sendEmail(options) {
     const { deliveryId, address, mintId, timestamp } = options;
 
-    return {
+    const subject = `Document Delivery: ${mintId}`;
+    const links = {
+      view: `https://chitty.cc/view/${deliveryId}`,
+      receipt: `https://chitty.cc/receipt/${deliveryId}`,
+      decline: `https://chitty.cc/decline/${deliveryId}`
+    };
+
+    const base = {
       channel: 'email',
-      dispatched: true,
-      messageId: `MSG-${deliveryId}`,
       to: address,
-      subject: `Document Delivery: ${mintId}`,
+      subject,
       trackingPixel: true,
       readReceiptRequested: true,
-      links: {
-        view: `https://chitty.cc/view/${deliveryId}`,
-        receipt: `https://chitty.cc/receipt/${deliveryId}`,
-        decline: `https://chitty.cc/decline/${deliveryId}`
-      },
+      links,
       timestamp
     };
+
+    const provider = this.dlvr.registeredEmail;
+    if (!provider) {
+      return {
+        ...base,
+        dispatched: true,
+        simulated: true,
+        messageId: `MSG-${deliveryId}`
+      };
+    }
+
+    try {
+      const result = await provider.send({
+        to: address,
+        subject,
+        body: this.buildEmailBody({ deliveryId, mintId, links }),
+        customerTrackingId: deliveryId,
+        clientCode: mintId
+      });
+
+      return {
+        ...base,
+        dispatched: true,
+        registered: true,
+        provider: 'rpost',
+        providerMode: provider.mode,
+        messageId: result.trackingId || `MSG-${deliveryId}`,
+        trackingId: result.trackingId,
+        providerStatus: result.status
+      };
+    } catch (error) {
+      return {
+        ...base,
+        dispatched: false,
+        registered: false,
+        provider: 'rpost',
+        providerMode: provider.mode,
+        error: error.message
+      };
+    }
+  }
+
+  buildEmailBody({ deliveryId, mintId, links }) {
+    return [
+      '<p>You have received a certified document delivery via ChittyDLVR.</p>',
+      `<p>Document: <strong>${mintId}</strong><br>Delivery ID: <strong>${deliveryId}</strong></p>`,
+      `<p><a href="${links.view}">View document</a> · <a href="${links.receipt}">Delivery receipt</a> · <a href="${links.decline}">Decline</a></p>`,
+      '<p>This message is tracked and certified. Proof of delivery is recorded.</p>'
+    ].join('\n');
   }
 
   /**

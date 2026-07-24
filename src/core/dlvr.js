@@ -10,6 +10,7 @@
 import { DeliveryChannel } from './channels.js';
 import { ReceiptEngine } from './receipt.js';
 import { ServiceEngine } from './service.js';
+import { createRegisteredEmailClient } from './registered-email.js';
 
 export class ChittyDLVR {
   constructor(config = {}) {
@@ -17,6 +18,12 @@ export class ChittyDLVR {
     this.baseUrl = config.baseUrl || 'https://api.chitty.cc/dlvr/v1';
     this.chittyId = config.chittyId || null;
     this.signingKeyJwk = config.signingKeyJwk || null;
+
+    // Registered email provider (RPost RMail direct or via chittyrouter);
+    // null when unconfigured — email channel falls back to simulated dispatch
+    this.registeredEmail = config.registeredEmail !== undefined
+      ? config.registeredEmail
+      : createRegisteredEmailClient(config.env || {});
 
     // Core engines
     this.channels = new DeliveryChannel(this);
